@@ -1,0 +1,451 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Kubus Gestur Tangan</title>
+<style>
+  *{margin:0;padding:0;box-sizing:border-box}
+  html,body{height:100%;overflow:hidden;background:#04060d;font-family:system-ui,sans-serif}
+
+  #kamera{position:fixed;inset:0;overflow:hidden}
+  #kamera video, #kamera canvas{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
+  #kamera.cermin video, #kamera.cermin canvas{transform:scaleX(-1)}
+  #kamera::after{
+    content:""; position:absolute; inset:0;
+    background:radial-gradient(120% 90% at 50% 55%, rgba(4,6,13,.08), rgba(4,6,13,.55));
+  }
+
+  /* ---------- kubus transparan ---------- */
+  #panggung{position:fixed;inset:0;perspective:1100px;z-index:2;pointer-events:none}
+
+  #kubusBungkus{
+    position:absolute; left:50%; top:50%; margin:-100px 0 0 -100px;
+    width:200px; height:200px;
+    opacity:0; transform:scale(.55);
+    transition:opacity .5s ease, transform .55s cubic-bezier(.2,1.5,.35,1);
+  }
+  #kubusBungkus.tampil{opacity:1; transform:scale(1)}
+
+  #kubus3d{
+    position:relative; width:200px; height:200px;
+    transform-style:preserve-3d;
+    animation:putarKubus 16s linear infinite;
+  }
+  @keyframes putarKubus{ from{transform:rotateX(-13deg) rotateY(0deg)} to{transform:rotateX(-13deg) rotateY(360deg)} }
+
+  .muka{
+    position:absolute; inset:0;
+    border:1.3px solid rgba(190,222,255,.55);
+    background:linear-gradient(160deg, rgba(160,205,255,.07), rgba(160,205,255,.015));
+    box-shadow:inset 0 0 24px rgba(150,190,255,.08);
+    border-radius:4px;
+  }
+  .depan   { transform:translateZ(100px); }
+  .belakang{ transform:translateZ(-100px) rotateY(180deg); }
+  .kanan   { transform:rotateY(90deg) translateZ(100px); }
+  .kiri    { transform:rotateY(-90deg) translateZ(100px); }
+  .atas    { transform:rotateX(90deg) translateZ(100px); }
+  .bawah   { transform:rotateX(-90deg) translateZ(100px); }
+
+  /* ---------- isi kubus (rata, tidak ikut berputar) ---------- */
+  #isiWrapper{
+    position:absolute; left:50%; top:50%; transform:translate(-50%,-50%);
+    display:flex; align-items:center; justify-content:center;
+  }
+  .isi{
+    position:absolute; opacity:0; transform:scale(.3);
+    transition:opacity .45s ease, transform .5s cubic-bezier(.25,1.6,.4,1);
+    filter:drop-shadow(0 6px 16px rgba(0,0,0,.45));
+  }
+  .isi.tampil{opacity:1; transform:scale(1)}
+  .isi svg{width:min(30vw,140px); height:min(30vw,140px); display:block}
+  #isiNama{
+    font-family:Georgia,"Cormorant Garamond",serif; font-style:italic; font-weight:700;
+    font-size:clamp(1.3rem,6vw,2.1rem); color:#eaf7ff; white-space:nowrap;
+    text-shadow:0 0 16px rgba(140,200,255,.85), 0 0 36px rgba(140,200,255,.5);
+  }
+
+  /* percikan saat objek sirna */
+  .pecah{
+    position:fixed; width:5px; height:5px; border-radius:50%;
+    background:radial-gradient(circle,#fff8ea,#ff9fc7 60%,transparent);
+    box-shadow:0 0 7px 2px rgba(255,190,220,.8);
+    left:0; top:0; z-index:6; pointer-events:none;
+    animation:pecahAnim .85s ease-out forwards;
+  }
+  @keyframes pecahAnim{
+    0%{transform:translate(0,0) scale(1); opacity:1}
+    100%{transform:translate(var(--dx),var(--dy)) scale(.15); opacity:0}
+  }
+
+  #status{
+    position:fixed; left:14px; top:14px; z-index:3; font-size:.78rem;
+    color:rgba(220,235,255,.9); background:rgba(10,14,26,.5); backdrop-filter:blur(4px);
+    padding:8px 12px; border-radius:10px; line-height:1.5; border:1px solid rgba(150,190,255,.2);
+  }
+  #status b{color:#bfe3ff}
+
+  #memuat{
+    position:fixed; inset:0; z-index:10; display:flex; flex-direction:column; gap:14px;
+    align-items:center; justify-content:center; background:#04060d; color:#dfe9f5;
+    text-align:center; padding:24px; transition:opacity .5s ease;
+  }
+  #memuat .putar{
+    width:34px; height:34px; border-radius:50%;
+    border:3px solid rgba(160,200,255,.25); border-top-color:#8fc7ff;
+    animation:putar 1s linear infinite;
+  }
+  @keyframes putar{to{transform:rotate(360deg)}}
+  #memuat.sembunyi{opacity:0; pointer-events:none}
+  #memuat p{max-width:34ch; font-size:.92rem; color:#9fb3cc; line-height:1.6}
+  #memuat .judul{font-size:1.05rem; color:#eaf3ff}
+</style>
+</head>
+<body>
+
+<div id="kamera" class="cermin">
+  <video id="video" playsinline muted></video>
+  <canvas id="overlay"></canvas>
+</div>
+
+<div id="panggung">
+  <div id="kubusBungkus">
+    <div id="kubus3d">
+      <div class="muka depan"></div>
+      <div class="muka belakang"></div>
+      <div class="muka kanan"></div>
+      <div class="muka kiri"></div>
+      <div class="muka atas"></div>
+      <div class="muka bawah"></div>
+    </div>
+  </div>
+  <div id="isiWrapper">
+    <div class="isi" id="isiBunga">
+      <svg viewBox="-60 -70 120 130">
+        <defs>
+          <linearGradient id="gKelopakLily" x1="0" y1="1" x2="0" y2="0">
+            <stop offset="0%" stop-color="#fff6f5"/>
+            <stop offset="55%" stop-color="#ff8fbd"/>
+            <stop offset="100%" stop-color="#d81f5f"/>
+          </linearGradient>
+        </defs>
+        <g stroke="#2f7f4b" stroke-width="3" fill="#3c9a5c">
+          <path d="M0,40 C-4,10 -2,-10 0,-24" fill="none"/>
+          <ellipse cx="-15" cy="26" rx="17" ry="6.4" transform="rotate(-25 -15 26)"/>
+          <ellipse cx="14" cy="30" rx="16" ry="6.4" transform="rotate(20 14 30)"/>
+        </g>
+        <g id="bungaKiriKecil" transform="translate(-23,16) rotate(-16) scale(.58)"></g>
+        <g id="bungaKananKecil" transform="translate(24,20) rotate(14) scale(.52)"></g>
+        <g id="bungaUtamaLily" transform="translate(0,-10)"></g>
+      </svg>
+    </div>
+    <div class="isi" id="isiHati">
+      <svg viewBox="0 0 120 120">
+        <defs>
+          <linearGradient id="gHati" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stop-color="#ffd3dd"/><stop offset="55%" stop-color="#ff5d7a"/><stop offset="100%" stop-color="#e21f4e"/>
+          </linearGradient>
+        </defs>
+        <path fill="url(#gHati)" transform="translate(60,58) scale(2.6)" d="M0,7 C-6,0 -14,-6 -8,-11 C-4,-14 0,-11 0,-7 C0,-11 4,-14 8,-11 C14,-6 6,0 0,7 Z"/>
+      </svg>
+    </div>
+    <div class="isi" id="isiNama"><span id="teksNama"></span></div>
+  </div>
+</div>
+
+<div id="status"></div>
+
+<div id="memuat">
+  <div class="putar"></div>
+  <p class="judul" id="judulMemuat">Menyiapkan kamera…</p>
+  <p id="pesanMemuat">Izinkan akses kamera saat browser meminta. Perlu koneksi internet sekali di awal untuk memuat model pengenal tangan.</p>
+</div>
+
+<!-- ================= YANG BOLEH KAMU UBAH ================= -->
+<script>
+  const KONFIGURASI = {
+    nama: "Nurfah",              // nama yang tampil sebagai salah satu isi kubus
+    tampilkanSkeleton: false,   // true = titik-titik tangan ikut terlihat di kamera
+    tampilkanStatus: true,      // true = kotak info kecil di kiri atas
+    cerminKamera: true          // true = tampilan seperti cermin (disarankan tetap true)
+  };
+</script>
+<!-- =========================================================== -->
+
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js" crossorigin="anonymous"></script>
+
+<script>
+(function(){
+  document.getElementById("teksNama").textContent = KONFIGURASI.nama;
+  document.getElementById("kamera").classList.toggle("cermin", KONFIGURASI.cerminKamera);
+  document.getElementById("status").style.display = KONFIGURASI.tampilkanStatus ? "block" : "none";
+
+  /* ---------- bangun bunga lily (bouquet kecil) ---------- */
+  const NS = "http://www.w3.org/2000/svg";
+  function buatKelopakLily(induk){
+    for (let i = 0; i < 6; i++){
+      const g = document.createElementNS(NS,"g");
+      g.setAttribute("transform", `rotate(${i*60})`);
+      const jalur = document.createElementNS(NS,"path");
+      jalur.setAttribute("d","M0,0 C-9,-8 -11,-24 -3,-35 C-1,-39 1,-39 3,-35 C11,-24 9,-8 0,0 Z");
+      jalur.setAttribute("fill","url(#gKelopakLily)");
+      jalur.setAttribute("stroke","#c4265c");
+      jalur.setAttribute("stroke-width",".5");
+      g.appendChild(jalur);
+      [[-2,-19],[1.6,-25],[-1,-14]].forEach(([bx,by]) => {
+        const titik = document.createElementNS(NS,"circle");
+        titik.setAttribute("cx",bx); titik.setAttribute("cy",by);
+        titik.setAttribute("r",1.1); titik.setAttribute("fill","#a3123f"); titik.setAttribute("opacity",".75");
+        g.appendChild(titik);
+      });
+      induk.appendChild(g);
+    }
+    for (let i = 0; i < 6; i++){
+      const g = document.createElementNS(NS,"g");
+      g.setAttribute("transform", `rotate(${i*60+30})`);
+      const garis = document.createElementNS(NS,"line");
+      garis.setAttribute("x1",0); garis.setAttribute("y1",0);
+      garis.setAttribute("x2",0); garis.setAttribute("y2",-13);
+      garis.setAttribute("stroke","#e8b23c"); garis.setAttribute("stroke-width",1.4);
+      g.appendChild(garis);
+      const ujung = document.createElementNS(NS,"ellipse");
+      ujung.setAttribute("cx",0); ujung.setAttribute("cy",-13.5);
+      ujung.setAttribute("rx",1.6); ujung.setAttribute("ry",2.4); ujung.setAttribute("fill","#c9791f");
+      g.appendChild(ujung);
+      induk.appendChild(g);
+    }
+    const pusat = document.createElementNS(NS,"circle");
+    pusat.setAttribute("r",2.6); pusat.setAttribute("fill","#f7e8a0");
+    induk.appendChild(pusat);
+  }
+  buatKelopakLily(document.getElementById("bungaUtamaLily"));
+  buatKelopakLily(document.getElementById("bungaKiriKecil"));
+  buatKelopakLily(document.getElementById("bungaKananKecil"));
+
+  /* ---------- elemen & state ---------- */
+  const isiSemua = [document.getElementById("isiBunga"), document.getElementById("isiHati"), document.getElementById("isiNama")];
+  const namaObjek = ["bunga","hati","nama"];
+  const elKubusBungkus = document.getElementById("kubusBungkus");
+  const elStatus = document.getElementById("status");
+  const elMemuat = document.getElementById("memuat");
+  const elJudulMemuat = document.getElementById("judulMemuat");
+  const elPesanMemuat = document.getElementById("pesanMemuat");
+
+  let kubusTerlihat = false;
+  let isiTampil = false;
+  let objekAktif = 0;
+
+  function bukaKubus(){
+    kubusTerlihat = true;
+    elKubusBungkus.classList.add("tampil");
+    objekAktif = 0;
+    isiSemua.forEach((el,i) => el.classList.toggle("tampil", i===0));
+    isiTampil = true;
+  }
+  function tutupKubus(){
+    kubusTerlihat = false;
+    elKubusBungkus.classList.remove("tampil");
+    isiSemua.forEach(el => el.classList.remove("tampil"));
+    isiTampil = false;
+  }
+  function sirnakanIsi(){
+    letusanPartikel(isiSemua[objekAktif]);
+    isiSemua[objekAktif].classList.remove("tampil");
+    isiTampil = false;
+  }
+  function munculkanBerikutnya(){
+    objekAktif = (objekAktif + 1) % isiSemua.length;
+    isiSemua.forEach((el,i) => el.classList.toggle("tampil", i===objekAktif));
+    isiTampil = true;
+  }
+  function letusanPartikel(elemen){
+    const r = elemen.getBoundingClientRect();
+    const cx = r.left + r.width/2, cy = r.top + r.height/2;
+    for (let i = 0; i < 26; i++){
+      const sudut = Math.random()*Math.PI*2;
+      const jarak = 46 + Math.random()*70;
+      const p = document.createElement("div");
+      p.className = "pecah";
+      p.style.left = cx+"px"; p.style.top = cy+"px";
+      p.style.setProperty("--dx", (Math.cos(sudut)*jarak)+"px");
+      p.style.setProperty("--dy", (Math.sin(sudut)*jarak)+"px");
+      p.style.animationDelay = (Math.random()*.15)+"s";
+      document.body.appendChild(p);
+      setTimeout(() => p.remove(), 1100);
+    }
+  }
+
+  /* ---------- baca gestur tangan ---------- */
+  function jarakTitik(a,b){ return Math.hypot(a.x-b.x, a.y-b.y); }
+  function jariBooleans(lm){
+    const pasangan = [[8,6],[12,10],[16,14],[20,18]];
+    return pasangan.map(([tip,pip]) => lm[tip].y < lm[pip].y - 0.03);
+  }
+  function ibuJariTerbuka(lm){
+    const skala = jarakTitik(lm[0], lm[9]) || 0.001;
+    return jarakTitik(lm[4], lm[5]) > skala * 0.55;
+  }
+  // tangan kiri: hanya telunjuk + jempol terbuka (jari lain terkepal)
+  function gestureDuaJariKiri(lm){
+    const [telunjuk, tengah, manis, kelingking] = jariBooleans(lm);
+    return telunjuk && !tengah && !manis && !kelingking && ibuJariTerbuka(lm);
+  }
+  // tangan kanan: hitung 4 jari (tanpa jempol) yang terbuka, 0-4
+  function hitungJariKanan(lm){
+    return jariBooleans(lm).filter(Boolean).length;
+  }
+
+  // Catatan: label "Left"/"Right" dari MediaPipe kadang tidak konsisten (tergantung
+  // browser & posisi kamera), jadi deteksi di bawah TIDAK bergantung pada label itu.
+  // Setiap tangan yang terlihat dicek bentuk gesturnya sendiri-sendiri.
+  const AMBANG_STABIL = 4;
+  let targetKubus = null, stabilKubus = 0;
+  let targetIsi = null, stabilIsi = 0;
+
+  function prosesHasil(hasil){
+    let duaJariAda = false;
+    let tanganKontrol = null;   // jumlah jari dari tangan yang BUKAN sedang membentuk gestur "dua jari"
+    const daftarTangan = hasil.multiHandLandmarks || [];
+
+    // tahap 1: cari tangan yang membentuk gestur "jempol+telunjuk" (untuk kubus)
+    daftarTangan.forEach((lm) => {
+      if (gestureDuaJariKiri(lm)) duaJariAda = true;
+    });
+    // tahap 2: tangan lain (yang tidak membentuk gestur itu) dipakai untuk kontrol isi
+    daftarTangan.forEach((lm) => {
+      if (!gestureDuaJariKiri(lm)) tanganKontrol = hitungJariKanan(lm);
+    });
+
+    if (daftarTangan.length > 0){
+      if (duaJariAda === targetKubus) stabilKubus++;
+      else { targetKubus = duaJariAda; stabilKubus = 1; }
+      if (stabilKubus >= AMBANG_STABIL && targetKubus !== kubusTerlihat){
+        targetKubus ? bukaKubus() : tutupKubus();
+      }
+    }
+
+    if (kubusTerlihat && tanganKontrol !== null){
+      const bukaPenuh = tanganKontrol >= 4;
+      const kepal = tanganKontrol <= 1;
+      const targetBaru = bukaPenuh ? "sirna" : (kepal ? "muncul" : targetIsi);
+      if (targetBaru === targetIsi) stabilIsi++;
+      else { targetIsi = targetBaru; stabilIsi = 1; }
+      if (targetIsi && stabilIsi >= AMBANG_STABIL){
+        if (targetIsi === "sirna" && isiTampil) sirnakanIsi();
+        if (targetIsi === "muncul" && !isiTampil) munculkanBerikutnya();
+        stabilIsi = 0;
+      }
+    } else {
+      targetIsi = null; stabilIsi = 0;
+    }
+
+    if (KONFIGURASI.tampilkanStatus){
+      elStatus.innerHTML =
+        `Tangan terdeteksi: <b>${daftarTangan.length}</b><br>` +
+        `Gestur kubus (jempol+telunjuk): <b>${duaJariAda ? "ya" : "tidak"}</b> (kubus ${kubusTerlihat ? "terlihat" : "tersembunyi"})<br>` +
+        `Tangan kontrol isi: <b>${tanganKontrol === null ? "—" : tanganKontrol + " jari"}</b> ` +
+        `(isi: ${isiTampil ? namaObjek[objekAktif] : "sirna"})`;
+    }
+  }
+
+  /* ---------- kamera & skeleton ---------- */
+  const video = document.getElementById("video");
+  const overlay = document.getElementById("overlay");
+  const ctxOverlay = overlay.getContext("2d");
+
+  // <canvas> tidak mengikuti object-fit:cover seperti <video>, jadi posisi & skala
+  // titik tangan dihitung manual di sini supaya pas menempel di video.
+  let skalaVideo = 1, offsetXVideo = 0, offsetYVideo = 0;
+
+  function sesuaikanUkuranKanvas(){
+    const DPR = Math.min(window.devicePixelRatio || 1, 2);
+    overlay.width = window.innerWidth * DPR;
+    overlay.height = window.innerHeight * DPR;
+    ctxOverlay.setTransform(DPR, 0, 0, DPR, 0, 0);
+
+    const vw = video.videoWidth || window.innerWidth;
+    const vh = video.videoHeight || window.innerHeight;
+    const aspekVideo = vw / vh, aspekLayar = window.innerWidth / window.innerHeight;
+    if (aspekLayar > aspekVideo){
+      skalaVideo = window.innerHeight / vh;
+      offsetXVideo = (window.innerWidth - vw * skalaVideo) / 2;
+      offsetYVideo = 0;
+    } else {
+      skalaVideo = window.innerWidth / vw;
+      offsetXVideo = 0;
+      offsetYVideo = (window.innerHeight - vh * skalaVideo) / 2;
+    }
+  }
+
+  function keTitikLayar(lm){
+    // ubah koordinat ternormalisasi (0..1) jadi posisi piksel di layar,
+    // menyesuaikan crop/scale yang sama seperti object-fit:cover pada video
+    return lm.map(t => ({
+      x: t.x * (video.videoWidth || window.innerWidth) * skalaVideo + offsetXVideo,
+      y: t.y * (video.videoHeight || window.innerHeight) * skalaVideo + offsetYVideo
+    }));
+  }
+
+  function gambarSkeleton(hasil){
+    ctxOverlay.save();
+    ctxOverlay.clearRect(0,0,window.innerWidth,window.innerHeight);
+    if (KONFIGURASI.tampilkanSkeleton && hasil.multiHandLandmarks){
+      for (const lm of hasil.multiHandLandmarks){
+        const titik = keTitikLayar(lm);
+        if (window.HAND_CONNECTIONS){
+          ctxOverlay.strokeStyle = "rgba(160,210,255,.55)";
+          ctxOverlay.lineWidth = 2;
+          for (const [a,b] of HAND_CONNECTIONS){
+            ctxOverlay.beginPath();
+            ctxOverlay.moveTo(titik[a].x, titik[a].y);
+            ctxOverlay.lineTo(titik[b].x, titik[b].y);
+            ctxOverlay.stroke();
+          }
+        }
+        ctxOverlay.fillStyle = "#bfe3ff";
+        for (const t of titik){
+          ctxOverlay.beginPath();
+          ctxOverlay.arc(t.x, t.y, 3.2, 0, Math.PI*2);
+          ctxOverlay.fill();
+        }
+      }
+    }
+    ctxOverlay.restore();
+  }
+  function tandaiSiap(){ elMemuat.classList.add("sembunyi"); }
+
+  const hands = new Hands({
+    locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`
+  });
+  hands.setOptions({
+    maxNumHands: 2,
+    modelComplexity: 1,
+    minDetectionConfidence: 0.7,
+    minTrackingConfidence: 0.6,
+    selfieMode: KONFIGURASI.cerminKamera
+  });
+  hands.onResults((hasil) => {
+    sesuaikanUkuranKanvas();
+    gambarSkeleton(hasil);
+    prosesHasil(hasil);
+    tandaiSiap();
+  });
+
+  const kamera = new Camera(video, {
+    onFrame: async () => { await hands.send({ image: video }); },
+    width: 640, height: 480
+  });
+
+  kamera.start().catch((err) => {
+    elJudulMemuat.textContent = "Tidak bisa mengakses kamera";
+    elPesanMemuat.textContent =
+      "Pastikan kamu mengizinkan akses kamera untuk halaman ini, lalu muat ulang. " +
+      "Kalau file dibuka langsung dari komputer, coba buka lewat Chrome. (" + (err && err.name || err) + ")";
+  });
+})();
+</script>
+</body>
+</html>
